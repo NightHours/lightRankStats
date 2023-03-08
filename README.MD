@@ -2,5 +2,5 @@
 
 ## Commands
 
-`getRanks`          - collect stats and automatically ctrl-c them to paste on discord
-`setRankEnchanted #`  - set number of items you have enchanted for clan (default 0)
+- `getRanks`          - collect stats and automatically ctrl-c them to paste on discord
+- `setRankEnchanted #`  - set number of items you have enchanted for clan (default 0)
