@@ -46,6 +46,42 @@
 		sequence="100"
 		>
 	</alias>
+   <alias
+		script="setKey"
+		match="^rank_key (.+)$"
+		enabled="y"
+		ignore_case="y"
+		regexp="y"
+		sequence="100"
+		>
+	</alias>
+   <alias
+		script="checkPromo"
+		match="^rank_check$"
+		enabled="y"
+		ignore_case="y"
+		regexp="y"
+		sequence="100"
+		>
+	</alias>
+   <alias
+		script="rankMode"
+		match="^rank_mode$"
+		enabled="y"
+		ignore_case="y"
+		regexp="y"
+		sequence="100"
+		>
+	</alias>
+   <alias
+		script="rankHelp"
+		match="^rank_help$"
+		enabled="y"
+		ignore_case="y"
+		regexp="y"
+		sequence="100"
+		>
+	</alias>
 </aliases>
 
 <!--  Triggers  -->
@@ -131,6 +167,13 @@
 require "tprint"
 require "serialize"
 require "gmcphelper"
+require "json"
+require "async"
+
+config = {
+   ["main"] = 0,
+   ["key"] = ""
+}
 
 lightRankData = {
    qps = 0,
@@ -215,30 +258,150 @@ function storeRankGoldData(name, line, wc)
    EnableTrigger("triggerRankGold", 0)
 end -- storeRankGoldData
 
+function rankUpdate(name, line, wc)
+   local baseUrl = config["main"] == 1 and "http://localhost:3000/api" or "https://lightclan.net/api"
+   local protocol = config["main"] == 1 and "HTTP" or "HTTPS"
+
+   local payload = json.encode({
+      player_name = gmcp("char.base.name"),
+      key = config["key"],
+      data = {
+         lightRankData["qps"], lightRankData["gqs"], lightRankData["levels"],
+         lightRankData["warWins"], lightRankData["warKills"], lightRankData["rooms"],
+         lightRankData["cps"], lightRankData["pups"], lightRankData["mobs"],
+         lightRankData["enchanted"], lightRankData["gold"]
+      }
+   })
+
+   local request_body = {
+      method = "POST",
+      headers = {
+         ["content-type"] = "application/json",
+         ["authorization"] = "Bearer " .. config["key"]
+      },
+      source = payload
+   }
+
+   ColourNote("orange", "", "Sending rank stats to API...")
+   async.doAsyncRemoteRequest(baseUrl .. "/promos/update", handleUpdatePromoResponse, protocol, 5, nil, request_body)
+end -- rankUpdate
+
 function storeRankRoomsData(name, line, wc)
    lightRankData["rooms"] = wc[1]
 
    tprint(lightRankData)
-
-   ColourNote("orange", "", "Rank info copied to Clipboard!")
-   SetClipboard (string.format("%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s", lightRankData["qps"],lightRankData["gqs"],lightRankData["levels"],lightRankData["warWins"],lightRankData["warKills"],lightRankData["rooms"],lightRankData["cps"],lightRankData["pups"],lightRankData["mobs"],lightRankData["enchanted"],lightRankData["gold"]))
+   rankUpdate()
 
    EnableTrigger("triggerRankRooms", 0)
    EnableGroup("rankTriggers", 0)
 end -- storeRankRoomsData
+
+function handleUpdatePromoResponse(retval, page, status, headers, full_status)
+   if status == 200 then
+      local data = json.decode(page)
+      ColourNote("cyan", "", "================================")
+      ColourNote("cyan", "", " Stats Updated: " .. data.player_name)
+      ColourNote("cyan", "", "================================")
+      if data.promoted then
+         ColourNote("green", "", " *** PROMOTED! ***")
+         ColourNote("green", "", " " .. data.old_rank .. " -> " .. data.new_rank)
+      else
+         ColourNote("yellow", "", " Rank:            " .. data.new_rank)
+      end
+      ColourNote("yellow", "", " Points:          " .. (data.points or "N/A"))
+      ColourNote("yellow", "", " Points Gained:   " .. (data.points_gained or "N/A"))
+      ColourNote("yellow", "", " Points to Next:  " .. (data.points_to_next_rank or "MAX"))
+      ColourNote("cyan", "", "================================")
+   else
+      ColourNote("red", "", string.format("Promo update failed (%s): %s", tostring(status), tostring(page)))
+   end
+end -- handleUpdatePromoResponse
+
+function setKey(name, line, wc)
+   config["key"] = wc[1]
+   ColourNote("orange", "", string.format("Auth key set: %s", wc[1]))
+end -- setKey
+
+function checkPromo(name, line, wc)
+   local player = gmcp("char.base.name")
+   local baseUrl = config["main"] == 1 and "http://localhost:3000/api" or "https://lightclan.net/api"
+   local protocol = config["main"] == 1 and "HTTP" or "HTTPS"
+
+   local request = {
+      method = "GET",
+      headers = {}
+   }
+
+   ColourNote("orange", "", string.format("Checking promo rank for %s...", player))
+   async.doAsyncRemoteRequest(baseUrl .. "/promos/check/" .. player .. "?key=" .. config["key"], handleCheckPromoResponse, protocol, 5, nil, request)
+end -- checkPromo
+
+function handleCheckPromoResponse(retval, page, status, headers, full_status)
+   if status == 200 then
+      local data = json.decode(page)
+      local s = data.stats
+      ColourNote("cyan", "", "================================")
+      ColourNote("cyan", "", " Promo Check: " .. data.player_name)
+      ColourNote("cyan", "", "================================")
+      ColourNote("yellow", "", " Rank:              " .. data.rank)
+      ColourNote("yellow", "", " Points:            " .. data.points)
+      ColourNote("yellow", "", " Points to Next:    " .. (data.points_to_next_rank or "MAX"))
+      ColourNote("cyan", "", "--------------------------------")
+      ColourNote("grey", "", string.format(" %-20s %-12s %s", "", "Gained", "Points"))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "QPs:",             s.qps.gained,             s.qps.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "GQs:",             s.gqs.gained,             s.gqs.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "Levels:",          s.levels.gained,          s.levels.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "War Wins:",        s.war_wins.gained,        s.war_wins.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "War Kills:",       s.war_kills.gained,       s.war_kills.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "Rooms:",           s.rooms.gained,           s.rooms.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "CPs:",             s.cps.gained,             s.cps.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "PUPs:",            s.pups.gained,            s.pups.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "Mob Kills:",       s.mob_kills.gained,       s.mob_kills.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "Items Enchanted:", s.items_enchanted.gained, s.items_enchanted.points))
+      ColourNote("white", "", string.format(" %-20s %-12s %s", "Gold:",            s.gold.gained,            s.gold.points))
+      ColourNote("cyan", "", "--------------------------------")
+      ColourNote("white", "", string.format(" %-20s %s", "Discretionary:", s.discretionary))
+      ColourNote("cyan", "", "================================")
+   else
+      ColourNote("red", "", string.format("Promo check failed (%s): %s", tostring(status), tostring(page)))
+   end
+end -- handleCheckPromoResponse
+
+function rankHelp(name, line, wc)
+   ColourNote("cyan", "", "=== lightRankStats Commands ===")
+   ColourNote("yellow", "", "getRanks")
+   ColourNote("white", "", "  Collect your rank stats and send them to the API.")
+   ColourNote("yellow", "", "rank_check")
+   ColourNote("white", "", "  Check your current promo rank from the API.")
+   ColourNote("yellow", "", "rank_key <key>")
+   ColourNote("white", "", "  Set your 64-character API key.")
+   ColourNote("yellow", "", "setrankenchanted <number>")
+   ColourNote("white", "", "  Manually set your enchanted item count.")
+   ColourNote("yellow", "", "rank_help")
+   ColourNote("white", "", "  Show this help text.")
+   ColourNote("cyan", "", "===============================")
+end -- rankHelp
+
+function rankMode(name, line, wc)
+   config["main"] = 1 - config["main"]
+   local label = config["main"] == 1 and "LOCAL (localhost:3000)" or "PRODUCTION (lightclan.net)"
+   ColourNote("orange", "", "API mode set to: " .. label)
+end -- rankMode
 
 function setRankEnchanted(name, line, wc)
    ColourNote("orange", "", string.format("Enchanted items: %s", wc[1]))
    lightRankData["enchanted"] = wc[1]
 end -- setRankEnchanted
 
-function OnPluginInstall ()
-	assert (loadstring (GetVariable ("lightRankData") or "")) ()
+function OnPluginInstall()
+   assert(loadstring(GetVariable("lightRankData") or ""))()
+   assert(loadstring(GetVariable("config") or ""))()
 end -- function OnPluginInstall
 
 function OnPluginSaveState()
-	SetVariable ("lightRankData", "lightRankData = " .. serialize.save_simple (lightRankData))
-end -- OnPluginSaveState
+   SetVariable("lightRankData", "lightRankData = " .. serialize.save_simple(lightRankData))
+   SetVariable("config", "config = " .. serialize.save_simple(config))
+end -- function OnPluginSaveState
 
 ]]>
 </script>
