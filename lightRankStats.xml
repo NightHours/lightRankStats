@@ -11,7 +11,7 @@
    author="TrEz"
    id="d0cfe6b6d8067e5fd9048d9f"
    language="Lua"
-   purpose="Get rank stats and output CSV format for discord bot"
+   purpose="Light | Check and Update clan rank"
    save_state="y"
    date_written="2022-11-15 16:06:19"
    requires="5.07"
